@@ -15,12 +15,17 @@ add_library(backtest
   src/Portfolio.cpp
   src/Metrics.cpp
   src/CsvLoader.cpp
-  src/Backtester.cpp)
+  src/Backtester.cpp
+  src/Statistics.cpp
+  src/WalkForward.cpp)
 target_include_directories(backtest PUBLIC include)
 
-# --- Demo executable --------------------------------------------------------
+# --- Demo executables -------------------------------------------------------
 add_executable(demo src/main.cpp)
 target_link_libraries(demo PRIVATE backtest)
+
+add_executable(overfitting_demo src/overfitting_demo.cpp)
+target_link_libraries(overfitting_demo PRIVATE backtest)
 
 # --- Tests (GoogleTest, fetched automatically) ------------------------------
 include(FetchContent)
@@ -32,7 +37,7 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 enable_testing()
-add_executable(backtest_tests tests/test_backtester.cpp)
+add_executable(backtest_tests tests/test_backtester.cpp tests/test_statistics.cpp)
 target_link_libraries(backtest_tests PRIVATE backtest GTest::gtest_main)
 
 include(GoogleTest)

@@ -3,7 +3,8 @@
 A backtesting framework that runs pluggable trading **strategies** over historical
 price bars, simulates fills with commission, and reports the metrics a quant
 actually looks at — **Sharpe ratio, max drawdown, annualised return** — plus an
-equity curve. Built around an event loop that structurally **prevents look-ahead bias**.
+equity curve. Built around an event loop that structurally **prevents look-ahead bias**, with
+**walk-forward optimisation** and a **deflated Sharpe ratio** to expose overfitting.
 
 ## Architecture
 
@@ -43,14 +44,37 @@ The trend-follower beat buy-and-hold **and** more than halved the drawdown by
 sitting out the bear phase; mean-reversion lost money in a trending market — a
 reminder that a strategy's edge depends entirely on the regime.
 
+## Guarding against overfitting (deflated Sharpe + walk-forward)
+
+A backtest that grid-searches parameters and reports the winner is lying to you —
+the best of many trials looks good by luck alone. `overfitting_demo` shows the two
+disciplines that expose it, over 25 MA-cross configurations:
+
+```
+In-sample best MA(15/50)  Sharpe 1.20   <-- cherry-picked, looks great
+Probabilistic Sharpe                 0.981
+Deflated Sharpe (best-of-25)         0.496   <-- a coin flip once corrected
+
+Walk-forward (train 252 / test 63)   OOS Sharpe 0.58, return +9.8%, maxDD 9%
+```
+
+- **[Deflated Sharpe](include/backtest/Statistics.h)** (Bailey & Lopez de Prado)
+  corrects the Sharpe for the number of trials, sample length, skew and fat tails.
+- **[Walk-forward](include/backtest/WalkForward.h)** re-optimises on a rolling
+  in-sample window and only ever measures performance on the *next, unseen* window.
+
+The in-sample Sharpe (1.20) collapsing to an out-of-sample 0.58 is the overfitting,
+made measurable.
+
 ## Build & run
 
 ```bash
 cmake -S . -B build
 cmake --build build
 
-./build/demo data/sample.csv   # compares strategies vs. buy-and-hold
-ctest --test-dir build         # 9 unit tests
+./build/demo data/sample.csv              # strategies vs. buy-and-hold
+./build/overfitting_demo data/sample.csv  # deflated Sharpe + walk-forward
+ctest --test-dir build                    # 14 unit tests
 ```
 
 Point `demo` at any CSV with a `Date,Open,High,Low,Close,Volume` header
@@ -59,10 +83,12 @@ Point `demo` at any CSV with a `Date,Open,High,Low,Close,Volume` header
 ## Project layout
 
 ```
-include/backtest/   Bar, Strategy, Portfolio, Metrics, CsvLoader, Backtester
+include/backtest/   Bar, Strategy, Portfolio, Metrics, CsvLoader, Backtester,
+                    Statistics (deflated Sharpe), WalkForward
 include/backtest/strategies/   MovingAverageCross.h, MeanReversion.h
-src/                Portfolio, Metrics, CsvLoader, Backtester, main
-tests/              test_backtester.cpp   (GoogleTest)
+src/                Portfolio, Metrics, CsvLoader, Backtester, Statistics,
+                    WalkForward, main, overfitting_demo
+tests/              test_backtester.cpp, test_statistics.cpp   (GoogleTest)
 data/               sample.csv            (synthetic OHLCV series)
 ```
 
