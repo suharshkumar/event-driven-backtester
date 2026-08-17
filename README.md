@@ -1,10 +1,12 @@
 # Event-Driven Backtesting Engine (C++17)
 
-A backtesting framework that runs pluggable trading **strategies** over historical
-price bars, simulates fills with commission, and reports the metrics a quant
-actually looks at — **Sharpe ratio, max drawdown, annualised return** — plus an
-equity curve. Built around an event loop that structurally **prevents look-ahead bias**, with
-**walk-forward optimisation** and a **deflated Sharpe ratio** to expose overfitting.
+A backtesting framework that runs pluggable strategies over historical price
+bars, simulates fills with commission, and reports Sharpe, max drawdown and
+annualised return along with an equity curve.
+
+The event loop is built so that look-ahead bias can't happen. There's also
+walk-forward optimisation and a deflated Sharpe ratio for catching overfitting,
+which turned out to be the more interesting half of the project.
 
 ## Architecture
 
@@ -18,53 +20,58 @@ CSV bars ──▶ Backtester (event loop) ──▶ Strategy.onBar()  ──▶
               equity curve ──▶ Metrics (Sharpe, drawdown, return)
 ```
 
-- **`Strategy`** — an abstract base class (the Strategy pattern). New strategies
-  just subclass it and implement `onBar()`. Two are included:
-  `MovingAverageCross` (trend following) and `MeanReversion` (z-score).
-- **`Portfolio`** — long/flat cash accounting with proportional commission.
-- **`Backtester`** — the event loop: decide → execute at the close → mark to market.
-- **`Metrics`** — Sharpe, max drawdown, total & annualised return.
+`Strategy` is an abstract base class, so a new strategy just subclasses it and
+implements `onBar()`. Two come with it: `MovingAverageCross` for trend following
+and `MeanReversion` on a z-score.
 
-## No look-ahead bias — by construction
+`Portfolio` does long/flat cash accounting with proportional commission.
+`Backtester` is the event loop (decide, execute at the close, mark to market).
+`Metrics` computes Sharpe, max drawdown, and total and annualised return.
 
-Look-ahead bias (letting a backtest "see" the future) is the #1 way results lie.
-Here the engine hands the strategy **one bar at a time, in order, and never a
-future bar** — so a strategy physically cannot peek ahead. Signals are also filled
-at the *same* bar's close they were computed from, never an earlier price.
+## Why look-ahead bias can't happen here
 
-## Results (`./build/demo data/sample.csv`, 756-day synthetic series)
+Letting a backtest see the future is the single most common way results end up
+lying to you, and it's usually accidental. The engine hands the strategy one bar
+at a time, in order, and never a future bar, so a strategy physically has no way
+to peek. Signals also fill at the close of the same bar they were computed from,
+never at an earlier price.
+
+## Results
+
+`./build/demo data/sample.csv` over a 756-day synthetic series:
 
 | Strategy | Total return | Annualised | Sharpe | Max drawdown | Trades |
 |---|---|---|---|---|---|
 | Buy & Hold | +28.9% | +8.8% | 0.53 | 31.7% | 0 |
-| **MA-cross(20/50)** | **+57.5%** | **+16.4%** | **1.12** | **12.0%** | 10 |
-| MeanReversion(20) | −6.7% | −2.3% | −0.10 | 36.9% | 29 |
+| MA-cross(20/50) | +57.5% | +16.4% | 1.12 | 12.0% | 10 |
+| MeanReversion(20) | -6.7% | -2.3% | -0.10 | 36.9% | 29 |
 
-The trend-follower beat buy-and-hold **and** more than halved the drawdown by
-sitting out the bear phase; mean-reversion lost money in a trending market — a
-reminder that a strategy's edge depends entirely on the regime.
+The trend follower beat buy-and-hold and roughly halved the drawdown, mostly by
+sitting out the bear phase. Mean reversion lost money in a trending market. That
+gap is regime, not skill, which is worth keeping in mind before reading much
+into any single backtest.
 
-## Guarding against overfitting (deflated Sharpe + walk-forward)
+## Overfitting: deflated Sharpe and walk-forward
 
-A backtest that grid-searches parameters and reports the winner is lying to you —
-the best of many trials looks good by luck alone. `overfitting_demo` shows the two
-disciplines that expose it, over 25 MA-cross configurations:
+A backtest that grid-searches parameters and reports the winner isn't telling
+you much, because the best of many trials looks good on luck alone.
+`overfitting_demo` runs 25 MA-cross configurations and then applies the two
+things that expose it:
 
 ```
 In-sample best MA(15/50)  Sharpe 1.20   <-- cherry-picked, looks great
 Probabilistic Sharpe                 0.981
 Deflated Sharpe (best-of-25)         0.496   <-- a coin flip once corrected
-
 Walk-forward (train 252 / test 63)   OOS Sharpe 0.58, return +9.8%, maxDD 9%
 ```
 
-- **[Deflated Sharpe](include/backtest/Statistics.h)** (Bailey & Lopez de Prado)
-  corrects the Sharpe for the number of trials, sample length, skew and fat tails.
-- **[Walk-forward](include/backtest/WalkForward.h)** re-optimises on a rolling
-  in-sample window and only ever measures performance on the *next, unseen* window.
+[Deflated Sharpe](include/backtest/Statistics.h) (Bailey and Lopez de Prado)
+corrects for the number of trials, the sample length, skew and fat tails.
+[Walk-forward](include/backtest/WalkForward.h) re-optimises on a rolling
+in-sample window and only ever measures on the next unseen one.
 
-The in-sample Sharpe (1.20) collapsing to an out-of-sample 0.58 is the overfitting,
-made measurable.
+An in-sample 1.20 collapsing to 0.58 out of sample is the overfitting, made
+measurable instead of argued about.
 
 ## Build & run
 
@@ -72,15 +79,15 @@ made measurable.
 cmake -S . -B build
 cmake --build build
 
-./build/demo data/sample.csv              # strategies vs. buy-and-hold
+./build/demo data/sample.csv              # strategies vs buy-and-hold
 ./build/overfitting_demo data/sample.csv  # deflated Sharpe + walk-forward
 ctest --test-dir build                    # 14 unit tests
 ```
 
-Point `demo` at any CSV with a `Date,Open,High,Low,Close,Volume` header
-(the format Yahoo Finance exports).
+Point `demo` at any CSV with a `Date,Open,High,Low,Close,Volume` header, which
+is what Yahoo Finance exports.
 
-## Project layout
+## Layout
 
 ```
 include/backtest/   Bar, Strategy, Portfolio, Metrics, CsvLoader, Backtester,
@@ -92,16 +99,17 @@ tests/              test_backtester.cpp, test_statistics.cpp   (GoogleTest)
 data/               sample.csv            (synthetic OHLCV series)
 ```
 
-## What the tests enforce
+## What the tests check
 
-- Max drawdown and returns computed exactly on hand-checked series
-- Portfolio round-trips (buy→sell) and ignores redundant signals; commission bites
-- Moving-average strategy fires a golden cross on rising prices
-- End-to-end: entering an uptrend produces a profit
+- Max drawdown and returns against hand-checked series
+- Portfolio round-trips (buy then sell), ignores redundant signals, and that
+  commission actually reduces the result
+- The moving-average strategy fires a golden cross on rising prices
+- End to end: entering an uptrend makes money
 
 ## Roadmap
 
-- [ ] Execute at next bar's open (more realistic than same-bar close)
-- [ ] Short selling and position sizing / risk limits
+- [ ] Execute at the next bar's open, which is more realistic than same-bar close
+- [ ] Short selling, position sizing, risk limits
 - [ ] Slippage model and per-trade logging
-- [ ] Portfolio of instruments; parameter sweep / walk-forward optimisation
+- [ ] Multiple instruments, and a proper parameter sweep
